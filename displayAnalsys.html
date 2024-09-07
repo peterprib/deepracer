@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en" style="height: 100%">
+
+<head>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script type="text/javascript"
+    src="https://fastly.jsdelivr.net/npm/echarts@5.5.1/dist/extension/dataTool.min.js"></script>
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts-gl@2/dist/echarts-gl.min.js"></script>
+  <!--
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts-stat@latest/dist/ecStat.min.js"></script>
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts-graph-modularity@2/dist/echarts-graph-modularity.min.js"></script>
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts@4.9.0/map/js/world.js"></script>
+  <script type="text/javascript" src="https://api.map.baidu.com/api?v=3.0&ak=YOUR_API_KEY"></script>
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts@5.5.1/dist/extension/bmap.min.js"></script>
+ -->
+
+  <script>
+    function Numpy(data) {
+      if (data) this.parse(data)
+    }
+    Numpy.prototype.dataTypes = {
+      "|b1": {
+        bytes4DataType: 1,
+        name: "bool",
+        cellConstructor: Uint8Array,
+        setDataView: "setUint8"
+      },
+      "<u1": {
+        name: "uint8",
+        bytes4DataType: 8,
+        cellConstructor: Uint8Array,
+        setDataView: "setUint8"
+      },
+      "|u1": {
+        name: "uint8",
+        bytes4DataType: 8,
+        cellConstructor: Uint8Array,
+        setDataView: "setUint8"
+      },
+      "|i1": {
+        name: "int8",
+        bytes4DataType: 8,
+        cellConstructor: Int8Array,
+        setDataView: "setInt8"
+      },
+      "<u2": {
+        name: "uint16",
+        bytes4DataType: 16,
+        cellConstructor: Uint16Array,
+        setDataView: "setUint16"
+      },
+      "<i1": {
+        name: "int8",
+        bytes4DataType: 8,
+        cellConstructor: Int8Array,
+        setDataView: "setInt16"
+      },
+      "<i2": {
+        name: "int16",
+        bytes4DataType: 16,
+        cellConstructor: Int16Array,
+        setDataView: "setInt16"
+      },
+      "<u4": {
+        name: "uint32",
+        bytes4DataType: 32,
+        cellConstructor: Int32Array,
+        setDataView: "setInt32"
+      },
+      "<i4": {
+        name: "int32",
+        bytes4DataType: 32,
+        cellConstructor: Int32Array,
+        setDataView: "setInt32"
+      },
+      "<u8": {
+        name: "uint64",
+        bytes4DataType: 64,
+        cellConstructor: BigUint64Array,
+        setDataView: "setBigUint64"
+      },
+      "<i8": {
+        name: "int64",
+        bytes4DataType: 64,
+        cellConstructor: BigInt64Array,
+        setDataView: "setBigInt64"
+      },
+      "<f4": {
+        name: "float32",
+        bytes4DataType: 32,
+        cellConstructor: Float32Array,
+        setDataView: "setFloat32"
+      },
+      "<f8": {
+        name: "float64",
+        bytes4DataType: 64,
+        cellConstructor: Float64Array,
+        setDataView: "setFloat64"
+      }
+    }
+    Numpy.prototype.parse = function (data) {
+      this.data = data
+      const magicBytes = String.fromCharCode.apply(null, new Uint8Array(this.data.slice(1, 6)))
+      if (magicBytes != 'NUMPY') throw new Error('unknown file type, missing magic bytes')
+      this.headerLength = new DataView(this.data.slice(8, 10)).getUint8(0)
+      this.offsetBytes = 10 + this.headerLength
+      this.headerContents = new TextDecoder("utf-8").decode(
+        new Uint8Array(this.data.slice(10, 10 + this.headerLength))
+      );
+      this.header = JSON.parse(
+        this.headerContents
+          .toLowerCase() // True -> true
+          .replace(/'/g, '"')
+          .replace("(", "[")
+          .replace(/,*\),*/g, "]")
+      )
+      this.dataTypeDetails = this.dataTypes[this.header.descr]
+      this.dataType = this.dataTypeDetails.name
+      this.setDataView = this.dataTypeDetails.setDataView
+      this.cellConstructor = this.dataTypeDetails.cellConstructor
+      this.bytes4DataType = Number.parseInt(this.header.descr[2], 10)
+      this.rows = this.header.shape[0]
+      this.columns = this.header.shape[1]
+      this.dataArray = new this.cellConstructor(this.data, this.offsetBytes)
+      return this
+    }
+    Numpy.prototype.forEachRow = function (call) {
+      const l = this.dataArray.length
+      for (let i = 0; i < l; i += this.columns)
+        call(this.dataArray.slice(i, i + this.columns))
+      return this
+    }
+    Numpy.prototype.mapRows = function (call) {
+      const result = []
+      this.forEachRow(r =>
+        result.push(call(r))
+      )
+      return result
+    }
+    Numpy.prototype.getData = function () {
+      return this.dataArray
+    }
+    Numpy.prototype.getColumn = function (columnIndex) {
+      const result = []
+      for (let i = columnIndex; i < this.dataArray; i += columnIndex) result.push(this.dataArray[i])
+      return result
+    }
+    Numpy.prototype.getColumns = function (...columnIndices) {
+      return this.mapRow(r =>
+        columnIndices.reduce((a, c) => {
+          const v = r[c]
+          a.push(v);
+          return a
+        }, [])
+      )
+    }
+    Numpy.prototype.getArray = function (level) {
+      const columns = this.rows
+      return this.dataArray
+        .reduce((a, v, i) => {
+          const c = i % columns;
+          if (c == 0) a.push([v])
+          else a[a.length - 1].push(v)
+          return a
+        }, [])
+    }
+
+    Numpy.prototype.toString = function () {
+      return JSON.stringify({ header: this.header, data: this.dataArray })
+    }
+    function getSIMColumns() {
+      const SIMColumns = [
+        { name: "episode", parse: Number.parseInt },
+        { name: "steps", parse: Number.parseInt },
+        { name: "x", parse: Number.parseFloat },
+        { name: "y", parse: Number.parseFloat },
+        { name: "yaw", parse: Number.parseFloat },  // heading
+        { name: "steering_angle", parse: Number.parseFloat },
+        { name: "speed", parse: Number.parseFloat },
+        { name: "action_taken", parse: Number.parseFloat },
+        { name: "reward", parse: Number.parseFloat },
+        { name: "done", parse: v => v == "True" },
+        { name: "all_wheels_on_track", parse: v => v == "True" },
+        { name: "progress", parse: Number.parseFloat },
+        { name: "closest_waypoint_index", parse: Number.parseInt },
+        { name: "track_track_length", parse: Number.parseFloat },
+        { name: "tstamp", parse: Number.parseFloat },
+        { name: "status", parse: v => v },
+        { name: "pause_duration", parse: Number.parseFloat },
+        { name: "obstacle_crash_counter", parse: Number.parseFloat },
+      ]
+      return SIMColumns
+    }
+    function getSIMColumnNames() { return getSIMColumns().map(c => c.name) }
+
+    function SIMColumnIndex(name) { return getSIMColumns().findIndex(row => name == row.name) }
+    function extractSIMData(data) {
+      const records = data.split("\n")
+      const recordID = "SIM_TRACE_LOG:"
+      const SIMColumns = getSIMColumns()
+      return records.filter(r => r.startsWith(recordID))
+        .map(l => l.substr(recordID.length)
+          .split(',')
+          .map((v, i) => SIMColumns[i].parse(v))
+        )
+    };
+
+    function createTable(data) {
+      return [document.createElement('table')]
+        .filter(table =>
+          !table.appendChild(
+            data.reduce((tbody, row) =>
+              !tbody.appendChild(row.reduce((tr, cell) =>
+                !tr.appendChild(document.createElement('td'))
+                  .appendChild(document.createTextNode(cell))
+                || tr,
+                document.createElement('tr')
+              )
+              )
+              || tbody,
+              document.createElement('tbody')
+            )
+          )
+          || table)[0];
+    }
+
+    function addTable(elementId, data) { return document.getElementById(elementId).replaceChildren(createTable(data)) };
+    function readFile(type="Text",ev,onload) {
+      const f = ev.target.files[0];
+      const r = new FileReader();
+      r.onload = function (ev) {
+        console.log("Loaded file name: " + f.name + " type: " + f.type + " size: " + f.size + " bytes")
+        try {
+          onload(ev.target.result)
+        } catch (ex) {
+          alert("Loaded file.\nname: " + f.name + "\ntype: " + f.type + "\nerror: " + ex.message);
+          console.error(ex.stack)
+        }
+      }
+      r["readAs"+type](f);
+    }
+
+    function readRaceLine(ev) {
+      readFile("ArrayBuffer",ev,data=>{
+        raceLine = new Numpy(data)
+        document.getElementById('convertedDataTrack').value = raceLine.toString()
+      })
+    }
+    const genLine = (laps, data, call) => {
+          if(!data) return []
+          const result = []
+          for (let i = 0; i < laps; i++)
+            data.forEachRow(r => result.push(call(r, i)))
+          return result
+        }
+    function readTrackFile(ev) {
+      readFile("ArrayBuffer",ev,data=>{
+        convertedData = new Numpy(data)
+        document.getElementById('convertedDataTrack').value = convertedData.toString()
+        const trackDom = document.getElementById('trackContainer');
+        const trackChart = echarts.init(trackDom);
+        lineMiddle = genLine(3, convertedData, (r, i) => [r[0], r[1], i]) //inner line
+        line2 = genLine(3, convertedData, (r, i) => [r[2], r[3], i]) //inner line
+        line3 = genLine(3, convertedData, (r, i) => [r[4], r[5], i]) //inner line
+        lineRaceLine = genLine(3, raceLine, (r, i) => [r[0], r[1], i])
+        const option = {
+            tooltip: {},
+            backgroundColor: '#fff',
+            xAxis3D: { type: 'value' },
+            yAxis3D: { type: 'value' },
+            zAxis3D: { type: 'value' },
+            grid3D: { viewControl: { projection: 'orthographic' } },
+            series: [
+              { type: 'line3D', data: lineRaceLine, lineStyle: { width: 4 } },
+              { type: 'line3D', data: lineMiddle, lineStyle: { width: 1 } },
+              { type: 'line3D', data: line2, lineStyle: { width: 2 } },
+              { type: 'line3D', data: line3, lineStyle: { width: 2 } }
+            ]
+          }
+        trackChart.setOption(option)
+        window.addEventListener('resize', trackChart.resize);
+      })
+    }
+
+    function readCsvFileSIM(ev) {
+      readFile("Text",ev,data=>{
+        const rows = data.split('\n').map(l => l.split(','))
+        const contentMinusHeader = rows.slice(1)
+        simData = simData.concat(contentMinusHeader)
+        addTable("simTable", rows.slice(0, 22))
+      })
+    }
+    function readSingleFile(ev) {
+      readFile("Text",ev,data=>{
+        document.getElementById('fileData').value = data;
+        simData = extractSIMData(data)
+        document.getElementById('convertedData').value = JSON.stringify(simData)
+        addTable("simTable", [getSIMColumnNames()].concat(simData.slice(0, 22)))
+        setLogChart()
+      })
+    }
+    function setLogChart(option=chartLogOptions()) {
+      const dom = document.getElementById('logChartContainer');
+        const logChart = echarts.init(dom, null, {
+          renderer: 'canvas',
+          useDirtyRect: false
+        });
+        logChart.setOption(option);
+        window.addEventListener('resize', logChart.resize);
+    }
+
+    const chartLogOptions = (
+      dataset = {source: simData, dimensions: getSIMColumnNames()},
+      encode = {x: 'x', y: 'y',  z: 'episode'}
+    ) => ({
+      tooltip: {},
+      grid3D: {},
+      xAxis3D: { type: 'value' },
+      yAxis3D: { type: 'value' },
+      zAxis3D: { type: 'value' },
+      dataset: dataset,
+      series: [
+        { type: 'line3D', data: lineRaceLine, lineStyle: { width: 2, color: "purple" } },
+        { type: 'line3D', data: lineMiddle, lineStyle: { width: 1, color: "yellow" } },
+        { type: 'line3D', data: line2, lineStyle: { width: 2, color: "green" } },
+        { type: 'line3D', data: line3, lineStyle: { width: 2, color: "green" } },
+        { type: 'line3D', lineStyle: { width: 4}, encode: encode }
+      ],
+      title: { text: 'Log', left: 'center'},
+      legend: { bottom: 5 },
+      visualMap: [
+        {
+          type: 'continuous',
+          min: 0,
+          max: 5,
+          dimension: SIMColumnIndex("speed") + 1, // offset+1
+          seriesIndex: 1, // The fourth series is mapped.
+          inRange: {
+            color: ['blue', '#121122', 'red'], // list of colors for mim to max
+            symbolSize: [30, 100] // mapping range being min,max value of data
+          },
+          outOfRange: { // Check the out of range visual configuration
+            symbolSize: [30, 100]
+          }
+        }
+      ]
+    });
+
+    const graphBubble = (data) =>
+      ({
+        xAxis: { splitLine: { show: false } },
+        yAxis: { splitLine: { show: false }, scale: true },
+        grid: {  left: 40, right: 130 },
+        series: [
+          {
+            name: 'speed',
+            data: data,
+            type: 'scatter',
+            symbolSize: (row)=> row[2]*2,
+            emphasis: { focus: 'self'}
+          },
+          { type: 'line', showSymbol: false, data: convertedData.mapRows(r=>[r[0],r[1]]), lineStyle: { width: 2, color: "green" } },
+          { type: 'line', showSymbol: false, data: convertedData.mapRows(r=>[r[2],r[3]]), lineStyle: { width: 2, color: "red" } },
+          { type: 'line', showSymbol: false, data: convertedData.mapRows(r=>[r[4],r[5]]), lineStyle: { width: 2, color: "red" } }
+
+          // 
+        ]
+      })
+
+//    const button = document.querySelector('button');
+
+    const openFileOrFiles = async (multiple = false) => {
+      const supportsFileSystemAccess =
+        "showOpenFilePicker" in window &&
+        (() => {
+          try {
+            return window.self === window.top;
+          } catch {
+            return false;
+          }
+        })();
+
+      if (supportsFileSystemAccess) {
+        let fileOrFiles = undefined;
+        try {
+          fileOrFiles = await showOpenFilePicker({ multiple });
+          if (!multiple) fileOrFiles = fileOrFiles[0];
+        } catch (err) { // Fail silently if the user has simply canceled the dialog.
+          if (err.name !== 'AbortError') console.error(err.name, err.message);
+        }
+        return fileOrFiles;
+      }
+      return new Promise((resolve) => {   // Fallback if the File System Access API is not supported.
+        // Append a new `` and hide it.
+        const input = document.createElement('input');
+        input.style.display = 'none';
+        input.type = 'file';
+        document.body.append(input);
+        if (multiple) input.multiple = true;
+        input.addEventListener('change', () => { // The `change` event fires when the user interacts with the dialog.
+          input.remove();
+          if (!input.files) return;
+          resolve(multiple ? input.files : input.files[0]);
+        });
+        if ('showPicker' in HTMLInputElement.prototype) {
+          input.showPicker();
+        } else {
+          input.click();
+        }
+      });
+    };
+
+    async function getSIMData(fileHandle){
+      const preGetSIMSDATA=document.getElementById('preGetSIMDATAid')
+      if(!preGetSIMSDATA) throw Error("can't find preGetSIMDATAid")
+      preGetSIMSDATA.text+=fileHandle.name+"\n"
+      const f = await fileHandle.getFile();
+      console.log("Loaded file name: " + f.name + " type: " + f.type + " size: " + f.size + " bytes")
+      const lap=f.name.split("-")[0]
+      const contents = await f.text();
+      const data = contents.split('\n').map(line => [lap].concat(line.split((','))))
+      data[0][0]="lap"
+      simData = simData.length?data:simData.concat(data.slice(1))
+      addTable("simTable", [getSIMColumnNames()].concat(data.slice(0, 11)))
+      setLogChart(chartLogOptions({source:simData},{x:"X",y:"Y",z:"lap"}))
+    }
+
+    async function buttonGetSIMDATA(){
+        const fileHandles = await openFileOrFiles(true);
+        if (!fileHandles) return;
+        Array.from(fileHandles).forEach(getSIMData)
+    }
+
+    async function getDataArray(fileHandle){
+      const preGetData=document.getElementById('preGetDataArray')
+      if(!preGetData) throw Error("can't find preGetData")
+      preGetData.text+=fileHandle.name+"\n"
+      const f = await fileHandle.getFile();
+      console.log("Loaded file name: " + f.name + " type: " + f.type + " size: " + f.size + " bytes")
+      const contents = await f.text();
+      const dataArray=JSON.parse(contents)
+      addTable("simTable", dataArray.slice(0, 11))
+
+      const dom = document.getElementById('bubbleChartContainer');
+        const bubbleChart = echarts.init(dom, null, {
+          renderer: 'canvas',
+          useDirtyRect: false
+        });
+        bubbleChart.setOption(graphBubble(dataArray));
+        window.addEventListener('resize', bubbleChart.resize);
+    }
+    async function buttonGet(getFunction){
+        const fileHandles = await openFileOrFiles(true);
+        if (!fileHandles) return;
+        Array.from(fileHandles).forEach(getFunction)
+    }
+
+    var lineMiddle = [], line2 = [], line3 = [], lineRaceLine = [], raceLine, simData = [], convertedData
+  </script>
+</head>
+
+<body style="height: 100%; margin: 0">
+  <div>
+    <table>
+      <tr>
+        <td>
+          <table>
+            <tr>
+              <td>
+                Track
+              </td>
+              <td>
+                <input type="file" id="fileInputTrack" />
+                <script type="text/javascript">
+                  document.getElementById('fileInputTrack').addEventListener('change', readTrackFile, false);
+                </script>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Race Line
+              </td>
+              <td>
+                <input type="file" id="fileRaceLine" />
+                <script type="text/javascript">
+                  document.getElementById('fileRaceLine').addEventListener('change', readRaceLine, false);
+                </script>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Log
+              </td>
+              <td>
+                <input type="file" id="fileinputLog" />
+                <script type="text/javascript">
+                  document.getElementById('fileinputLog').addEventListener('change', readSingleFile, false);
+                </script>
+              </td>
+            <tr>
+              <td>
+                <button class="getsimdata" type="button" onclick="buttonGetSIMDATA()">get SIMDATA Files</button>
+              </td>
+              <td>
+                <pre class="getsimdata" id="preGetSIMDATAid"></pre>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <button type="button" onclick="buttonGet(getDataArray)">get race line</button>
+              </td>
+              <td>
+                <pre id="preGetDataArray"></pre>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Add SIM CSV data
+              </td>
+              <td>
+                <input type="file" id="fileinputCSVFile" />
+                <script type="text/javascript">
+                  document.getElementById('fileinputCSVFile').addEventListener('change', readCsvFileSIM, false);
+                </script>
+              </td>
+            </tr>
+          </table>
+        </td>
+        <td>
+          <textarea rows=20 id="fileData"></textarea>
+        </td>
+        <td>
+          <textarea rows=20 id="convertedData"></textarea>
+        </td>
+        <td>
+          <textarea rows=20 id="convertedDataTrack"></textarea>
+        </td>
+        <td id="simTable">
+        </td>
+      </tr>
+    </table>
+  </div>
+  <div id="trackContainer" style="height: 100%"></div>
+  <div id="logChartContainer" style="height: 100%"></div>
+  <div id="bubbleChartContainer" style="height: 100%"></div>
+  <div id="container" style="height: 100%"></div>
+
+
+  <script type="text/javascript">
+    var dom = document.getElementById('container');
+    var myChart = echarts.init(dom, null, {
+      renderer: 'canvas',
+      useDirtyRect: false
+    });
+    var app = {};
+
+    var option;
+
+    option = {
+      xAxis: {
+        type: 'category',
+        data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+      },
+      yAxis: {
+        type: 'value'
+      },
+      series: [
+        {
+          data: [150, 230, 224, 218, 135, 147, 260],
+          type: 'line'
+        }
+      ]
+    };
+
+    if (option && typeof option === 'object') {
+      myChart.setOption(option);
+    }
+
+    window.addEventListener('resize', myChart.resize);
+  </script>
+</body>
+
+</html>
