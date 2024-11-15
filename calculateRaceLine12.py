@@ -15,7 +15,7 @@ available_track_names
 
 # Replace the name here with the track to analyze
 #TRACK_NAME = 'reInvent2019_track'
-TRACK_NAME = 'reinvent_base'
+TRACK_NAME = 'reInvent2019_wide_ccw'
 
 # Load the center, inner, outer waypoints
 waypoints = np.load("./tracks/%s.npy" % TRACK_NAME)
